@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# React build output
+build/
+
+# Electron distribution builds
+dist/
+
+# Capacitor generated platforms (run npx cap add android to regenerate)
+android/
+ios/
+
+# Environment — NEVER commit secrets
+.env
+.env.local
+.env.production
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor
+.vscode/
+.idea/
