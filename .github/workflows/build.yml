@@ -1,1 +1,229 @@
+# .github/workflows/build.yml
+# Manually triggered workflow — builds Android APK, and Electron for
+# Windows, macOS and Linux. All Node dependencies are installed fresh
+# in each job. Firebase config is read from GitHub Secrets (optional).
 
+name: Build — Manuia Finance
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'What to build'
+        required: true
+        default: 'all'
+        type: choice
+        options: [all, android, electron]
+
+env:
+  NODE_VERSION: '18'
+
+# ═══════════════════════════════════════════════════════════════
+# JOB 1 — Android APK (Capacitor)
+# ═══════════════════════════════════════════════════════════════
+jobs:
+  android:
+    if: ${{ github.event.inputs.target == 'all' || github.event.inputs.target == 'android' }}
+    name: Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install all Node dependencies
+        run: npm install
+
+      - name: Build React web app
+        run: npm run build
+        env:
+          REACT_APP_FIREBASE_API_KEY:            ${{ secrets.FIREBASE_API_KEY }}
+          REACT_APP_FIREBASE_AUTH_DOMAIN:        ${{ secrets.FIREBASE_AUTH_DOMAIN }}
+          REACT_APP_FIREBASE_PROJECT_ID:         ${{ secrets.FIREBASE_PROJECT_ID }}
+          REACT_APP_FIREBASE_STORAGE_BUCKET:     ${{ secrets.FIREBASE_STORAGE_BUCKET }}
+          REACT_APP_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}
+          REACT_APP_FIREBASE_APP_ID:             ${{ secrets.FIREBASE_APP_ID }}
+
+      - name: Add Capacitor Android platform
+        run: |
+          if [ ! -d "android" ]; then
+            npx cap add android
+          fi
+
+      - name: Install ImageMagick and pre-process icon (95% fill)
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y imagemagick bc
+          CANVAS=1024
+          LOGO=$(echo "$CANVAS * 95 / 100" | bc)
+          convert assets/icon.png \
+            -resize ${LOGO}x${LOGO} -gravity center \
+            -background none -extent ${CANVAS}x${CANVAS} \
+            assets/icon.png
+          echo "✅ Icon pre-processed — logo fills 95% of frame"
+
+      - name: Generate all icons and splash screens
+        run: |
+          npx @capacitor/assets generate \
+            --android \
+            --iconBackgroundColor "#F0F4F8" \
+            --iconBackgroundColorDark "#F0F4F8" \
+            --splashBackgroundColor "#F0F4F8" \
+            --splashBackgroundColorDark "#F0F4F8"
+
+      - name: Remove duplicate ic_launcher_background resource
+        run: rm -f android/app/src/main/res/values/ic_launcher_background.xml
+
+      - name: Write android/local.properties
+        run: echo "sdk.dir=$ANDROID_HOME" > android/local.properties
+
+      - name: Sync Capacitor to Android
+        run: npx cap sync android
+
+      - name: Make Gradle wrapper executable
+        run: chmod +x android/gradlew
+
+      - name: Build debug APK
+        working-directory: android
+        run: |
+          unset ANDROID_SDK_ROOT
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Rename APK → manuia-finance.apk
+        run: |
+          APK=$(find android -name "app-debug.apk" | head -1)
+          cp "$APK" manuia-finance.apk
+          echo "✅ $(du -sh manuia-finance.apk | cut -f1)"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: manuia-finance-android
+          path: manuia-finance.apk
+          retention-days: 30
+
+# ═══════════════════════════════════════════════════════════════
+# JOB 2 — Electron (Windows · macOS · Linux)
+# ═══════════════════════════════════════════════════════════════
+  electron-windows:
+    if: ${{ github.event.inputs.target == 'all' || github.event.inputs.target == 'electron' }}
+    name: Electron — Windows
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install all Node dependencies
+        run: npm install
+
+      - name: Build React web app
+        run: npm run build
+        env:
+          REACT_APP_FIREBASE_API_KEY:            ${{ secrets.FIREBASE_API_KEY }}
+          REACT_APP_FIREBASE_AUTH_DOMAIN:        ${{ secrets.FIREBASE_AUTH_DOMAIN }}
+          REACT_APP_FIREBASE_PROJECT_ID:         ${{ secrets.FIREBASE_PROJECT_ID }}
+          REACT_APP_FIREBASE_STORAGE_BUCKET:     ${{ secrets.FIREBASE_STORAGE_BUCKET }}
+          REACT_APP_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}
+          REACT_APP_FIREBASE_APP_ID:             ${{ secrets.FIREBASE_APP_ID }}
+
+      - name: Build Electron installer (.exe)
+        run: npx electron-builder --win
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: manuia-finance-windows
+          path: dist/electron/*.exe
+          retention-days: 30
+
+  electron-macos:
+    if: ${{ github.event.inputs.target == 'all' || github.event.inputs.target == 'electron' }}
+    name: Electron — macOS
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install all Node dependencies
+        run: npm install
+
+      - name: Build React web app
+        run: npm run build
+        env:
+          REACT_APP_FIREBASE_API_KEY:            ${{ secrets.FIREBASE_API_KEY }}
+          REACT_APP_FIREBASE_AUTH_DOMAIN:        ${{ secrets.FIREBASE_AUTH_DOMAIN }}
+          REACT_APP_FIREBASE_PROJECT_ID:         ${{ secrets.FIREBASE_PROJECT_ID }}
+          REACT_APP_FIREBASE_STORAGE_BUCKET:     ${{ secrets.FIREBASE_STORAGE_BUCKET }}
+          REACT_APP_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}
+          REACT_APP_FIREBASE_APP_ID:             ${{ secrets.FIREBASE_APP_ID }}
+
+      - name: Build Electron disk image (.dmg)
+        run: npx electron-builder --mac
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload macOS disk image
+        uses: actions/upload-artifact@v4
+        with:
+          name: manuia-finance-macos
+          path: dist/electron/*.dmg
+          retention-days: 30
+
+  electron-linux:
+    if: ${{ github.event.inputs.target == 'all' || github.event.inputs.target == 'electron' }}
+    name: Electron — Linux
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y rpm fakeroot dpkg
+
+      - name: Install all Node dependencies
+        run: npm install
+
+      - name: Build React web app
+        run: npm run build
+        env:
+          REACT_APP_FIREBASE_API_KEY:            ${{ secrets.FIREBASE_API_KEY }}
+          REACT_APP_FIREBASE_AUTH_DOMAIN:        ${{ secrets.FIREBASE_AUTH_DOMAIN }}
+          REACT_APP_FIREBASE_PROJECT_ID:         ${{ secrets.FIREBASE_PROJECT_ID }}
+          REACT_APP_FIREBASE_STORAGE_BUCKET:     ${{ secrets.FIREBASE_STORAGE_BUCKET }}
+          REACT_APP_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}
+          REACT_APP_FIREBASE_APP_ID:             ${{ secrets.FIREBASE_APP_ID }}
+
+      - name: Build Electron AppImage
+        run: npx electron-builder --linux
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Linux AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: manuia-finance-linux
+          path: dist/electron/*.AppImage
+          retention-days: 30
